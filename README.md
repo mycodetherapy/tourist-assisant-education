@@ -18,7 +18,7 @@
 
 ### Требования
 
-- Python **3.10+** (работает на 3.9+)
+- Python **3.10+** (рекомендуется **3.11**; на macOS не используйте системный `python3` 3.9)
 - Ключ **OpenRouter** ([openrouter.ai/keys](https://openrouter.ai/keys))
 
 ### Установка и запуск
@@ -27,9 +27,11 @@
 git clone <url-репозитория>
 cd tourist-assistant
 
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
-# Windows: .venv\Scripts\activate
+# Windows: py -3.11 -m venv .venv && .venv\Scripts\activate
+# macOS: если python3.11 нет — brew install python@3.11
+python --version  # должно быть 3.10+
 
 pip install -r requirements.txt
 
