@@ -38,3 +38,18 @@ function expandInlineDotItems(line: string): string[] {
   }
   return [parts[0], "", ...parts.slice(1).map((p) => `- ${p}`)];
 }
+
+/**
+ * Быстрый рендер коротких пользовательских шаблонов вида `${city}`.
+ * Используется в экспериментальных карточках билетов.
+ */
+export function renderTicketTemplate(
+  template: string,
+  context: Record<string, string>,
+): string {
+  // eslint-disable-next-line no-new-func
+  const fn = new Function("ctx", `with (ctx) { return \`${template}\`; }`) as (
+    ctx: Record<string, string>,
+  ) => string;
+  return fn(context);
+}

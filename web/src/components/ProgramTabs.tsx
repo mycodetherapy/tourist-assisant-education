@@ -5,7 +5,7 @@ import { getErrorMessage } from "../api/client";
 import { submitItemFeedback } from "../api/trips";
 import { parseRouteProgram, routeCaseAtIndex } from "../api/routeTypes";
 import type { ItemVote, ProgramResponse, VotableSectionKey } from "../api/types";
-import { normalizeTicketsMarkdown } from "../utils/ticketsMarkdown";
+import { normalizeTicketsMarkdown, renderTicketTemplate } from "../utils/ticketsMarkdown";
 import { ItemVoteButtons } from "./ItemVoteButtons";
 import { RouteCaseDetails } from "./RouteCaseDetails";
 import { RouteMapEmbed } from "./RouteMapEmbed";
@@ -75,6 +75,15 @@ function MarkdownBlock({
     return null;
   }
 
+  const enableFastHtml =
+    compact && new URLSearchParams(window.location.search).get("fastHtml") === "1";
+  const renderedText = compact
+    ? renderTicketTemplate(text, {
+        city: localStorage.getItem("lastCity") || "",
+        dates: localStorage.getItem("lastDates") || "",
+      })
+    : text;
+
   const handleTicketLinkClick = (href: string | undefined) => {
     if (!trackAffiliateClicks || !tripId || !href) {
       return;
@@ -83,6 +92,15 @@ function MarkdownBlock({
       logAffiliateClick(tripId, href).catch(() => undefined),
     );
   };
+
+  if (enableFastHtml) {
+    return (
+      <div
+        className={`prose max-w-none ${compact ? "prose-tickets" : "whitespace-pre-wrap"} ${className}`}
+        dangerouslySetInnerHTML={{ __html: renderedText }}
+      />
+    );
+  }
 
   return (
     <div
@@ -103,7 +121,7 @@ function MarkdownBlock({
           ),
         }}
       >
-        {text}
+        {renderedText}
       </ReactMarkdown>
     </div>
   );
