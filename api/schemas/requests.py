@@ -36,6 +36,10 @@ class AffiliateClickRequest(BaseModel):
     provider: str | None = Field(default=None, max_length=64)
 
 
+class WebhookTestRequest(BaseModel):
+    callback_url: str = Field(..., min_length=8, max_length=2000)
+
+
 class ItemFeedbackRequest(BaseModel):
     version_id: int | None = None
     section: VotableSectionKey

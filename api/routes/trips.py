@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Response
 
 from api.deps import get_run_manager, get_trip_service
@@ -11,6 +13,7 @@ from api.schemas.requests import (
     ItemFeedbackRequest,
     ReviewRequest,
     StartRunRequest,
+    WebhookTestRequest,
 )
 from api.schemas.responses import (
     CreateTripResponse,
@@ -236,6 +239,32 @@ def log_affiliate_click(
         sub_id=sub_id,
     )
     return Response(status_code=204)
+
+
+@router.post("/{trip_id}/webhook-test")
+def test_trip_webhook(
+    trip_id: int,
+    body: WebhookTestRequest,
+    service: TripService = Depends(get_trip_service),
+) -> dict[str, int | str]:
+    """Тестовый вызов webhook (для интеграции с внешними CRM)."""
+    if service.get_trip_details(trip_id) is None:
+        raise HTTPException(status_code=404, detail="Поездка не найдена")
+    from services.trip_webhook import notify_completion, sign_payload
+
+    payload = json.dumps({"trip_id": trip_id, "status": "completed"}, ensure_ascii=False)
+    try:
+        status_code = notify_completion(
+            callback_url=body.callback_url,
+            trip_id=trip_id,
+            status="completed",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status_code": status_code,
+        "signature": sign_payload(trip_id, payload),
+    }
 
 
 @router.get("/{trip_id}/preferences", response_model=TripPreferences | None)
