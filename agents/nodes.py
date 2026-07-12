@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from time import perf_counter
 
 from typing import Any, Literal
@@ -119,38 +121,55 @@ def planner_node(state: AgentState) -> dict[str, list[Any]]:
     return {"messages": [response]}
 
 
+def _execute_tool_call(name: str, resolved: str, args: dict[str, Any]) -> str:
+    """Выполняет один вызов инструмента и измеряет длительность. Ошибка → текст в результате."""
+    try:
+        if resolved not in TOOL_MAP:
+            raise KeyError(f"Неизвестный инструмент: {name}")
+        tool_started = perf_counter()
+        try:
+            result = TOOL_MAP[resolved].invoke(args)
+        finally:
+            record_tool_timing(resolved, perf_counter() - tool_started)
+        return result if isinstance(result, str) else str(result)
+    except Exception as exc:
+        return f"Ошибка выполнения инструмента {name}: {exc}"
+
+
 def executor_node(state: AgentState) -> dict[str, list[ToolMessage]]:
     """
     Узел исполнителя: tool_calls → ToolMessage.
     Ошибка инструмента → текст в ToolMessage, граф продолжается (planner видит сбой).
+    Независимые tool_calls выполняются параллельно в ThreadPoolExecutor (оба tool'а —
+    блокирующие HTTP-запросы, GIL освобождается на I/O); запись в БД и persist route
+    materials — последовательно в основном потоке после сбора всех результатов, чтобы
+    не писать в SQLite из нескольких потоков одновременно.
     """
     last = state["messages"][-1]
     if not isinstance(last, AIMessage) or not last.tool_calls:
         return {"messages": []}
 
-    tool_messages: list[ToolMessage] = []
+    calls = last.tool_calls
+    trip_id = state.get("trip_id")
 
-    for call in last.tool_calls:
+    prepared: list[tuple[str, str, dict[str, Any], str]] = []
+    for call in calls:
         name = call["name"]
-        args = resolve_tool_args(state, name, call.get("args") or {})
-        tool_call_id = call["id"]
-
-        trip_id = state.get("trip_id")
         resolved = resolve_tool_name(name)
-        try:
-            if resolved not in TOOL_MAP:
-                raise KeyError(f"Неизвестный инструмент: {name}")
-            if resolved == "search_route_materials":
-                clear_route_materials()
-            tool_started = perf_counter()
-            try:
-                result = TOOL_MAP[resolved].invoke(args)
-            finally:
-                record_tool_timing(resolved, perf_counter() - tool_started)
-            content = result if isinstance(result, str) else str(result)
-        except Exception as exc:
-            content = f"Ошибка выполнения инструмента {name}: {exc}"
+        args = resolve_tool_args(state, name, call.get("args") or {})
+        if resolved == "search_route_materials":
+            clear_route_materials()
+        prepared.append((name, resolved, args, call["id"]))
 
+    with ThreadPoolExecutor(max_workers=len(prepared)) as pool:
+        futures = [
+            pool.submit(copy_context().run, _execute_tool_call, name, resolved, args)
+            for name, resolved, args, _ in prepared
+        ]
+        contents = [future.result() for future in futures]
+
+    tool_messages: list[ToolMessage] = []
+    for (name, resolved, args, tool_call_id), content in zip(prepared, contents):
         if trip_id is not None:
             metrics = parse_tool_result(content)
             log_tool_run(
